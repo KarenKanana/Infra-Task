@@ -9,6 +9,7 @@ function App() {
   let [input, setInput] = React.useState('');
   let [message, setMessage] = React.useState('');
 
+  
   function sendMessage() {
     console.log(`Sending message: "${input}"`);
     fetch(BACKEND_URL + '/api/msg/' + input, {

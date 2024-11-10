@@ -50,6 +50,9 @@ def msg_get_api(msg_id):
     else:  # If the message is not found
         return jsonify({'error': 'Message not found'}), 404  # Return an error message
 
+
 if __name__ == "__main__":
     # Run the app locally on localhost:8080
     app.run(debug=True, host="127.0.0.1", port=8080)
+
+
