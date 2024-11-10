@@ -1,0 +1,77 @@
+name: CI/CD for fronend and backend
+
+on:
+  push:
+    paths:
+      - 'fronend/**'
+      - 'backend/**'
+  pull_request:
+    paths:
+      - 'fronend/**'
+      - 'backend/**'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SA_KEY }}
+      DATABASE_URI: ${{ secrets.DATABASE_URI }}
+      fronend_IMAGE: ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/applications/frontend
+      backend_IMAGE: ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/applications/backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Determine changes in fronend
+      - name: Check if fronend has changed
+        id: fronend_changed
+        run: |
+          if git diff --quiet HEAD^ HEAD -- fronend/; then
+            echo "fronend_changed=false" >> $GITHUB_ENV
+          else
+            echo "fronend_changed=true" >> $GITHUB_ENV
+          fi
+
+      # Determine changes in backend
+      - name: Check if backend has changed
+        id: backend_changed
+        run: |
+          if git diff --quiet HEAD^ HEAD -- backend/; then
+            echo "backend_changed=false" >> $GITHUB_ENV
+          else
+            echo "backend_changed=true" >> $GITHUB_ENV
+          fi
+
+      # Authenticate to GCP
+      - name: Authenticate to GCP
+        run: |
+          echo $SERVICE_ACCOUNT_KEY > gcp_key.json
+          gcloud config set project $PROJECT_ID
+          gcloud auth activate-service-account --key-file=gcp_key.json
+          gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev
+      # Build and push fronend Docker image if there are changes
+      - name: Build and push fronend Docker image
+        if: env.fronend_changed == 'true'
+        run: |
+          docker build -t $fronend_IMAGE:$GITHUB_SHA fronend/
+          docker push $fronend_IMAGE:$GITHUB_SHA
+
+      # Deploy fronend to Cloud Run if there are changes
+      - name: Deploy fronend to Cloud Run
+        if: env.fronend_changed == 'true'
+        run: |
+          BACKEND_URL=$(gcloud run services describe backend-cloudrun-service --region ${{ secrets.GCP_REGION }} --format="value(status.url)")
+          gcloud run deploy frontend-cloudrun-service --image $fronend_IMAGE:$GITHUB_SHA --region ${{ secrets.GCP_REGION }} --platform managed --allow-unauthenticated --set-env-vars=REACT_APP_BACKEND_URL=$BACKEND_URL 
+      # Build and push backend Docker image if there are changes
+      - name: Build and push backend Docker image
+        if: env.backend_changed == 'true'
+        run: |
+          docker build -t $backend_IMAGE:$GITHUB_SHA backend/
+          docker push $backend_IMAGE:$GITHUB_SHA
+
+      # Deploy backend to Cloud Run if there are changes
+      - name: Deploy backend to Cloud Run
+        if: env.backend_changed == 'true'
+        run: |
+          gcloud run deploy backend-cloudrun-service --image $backend_IMAGE:$GITHUB_SHA --region ${{ secrets.GCP_REGION }} --platform managed --allow-unauthenticated --set-env-vars=DATABASE_URI=$DATABASE_URI
